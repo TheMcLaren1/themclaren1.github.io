@@ -1,10 +1,82 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <title>My Website</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Roblox Image Lookup</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; max-width: 900px; margin: 0 auto; }
+    input, button { font-size: 16px; padding: 10px; }
+    .row { display:flex; gap:8px; margin: 12px 0; }
+    .card { border:1px solid #ddd; padding:12px; border-radius:10px; margin: 12px 0; }
+    img { max-width:100%; height:auto; border-radius:10px; }
+  </style>
 </head>
 <body>
-  <h1>Hello World</h1>
-  <p>This site was created from my iPad.</p>
+  <h1>Find your image</h1>
+
+  <div class="row">
+    <input id="name" placeholder="Enter Roblox username" style="flex:1" />
+    <button id="search">Search</button>
+  </div>
+
+  <div id="results"></div>
+
+  <p style="margin-top:24px;">
+    Admin? <a href="./admin.html">Upload page</a>
+    &nbsp;|&nbsp;
+    Owner? <a href="./owner.html">Owner panel</a>
+  </p>
+
+  <script type="module">
+    import { firebaseConfig } from "./firebase-config.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getFirestore, collection, query, where, orderBy, getDocs }
+      from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const results = document.getElementById("results");
+
+    const norm = (s) => (s || "").trim().toLowerCase();
+
+    document.getElementById("search").onclick = async () => {
+      results.innerHTML = "";
+      const name = norm(document.getElementById("name").value);
+      if (!name) {
+        results.innerHTML = "<p>Please enter a Roblox username.</p>";
+        return;
+      }
+
+      const q = query(
+        collection(db, "images"),
+        where("name", "==", name),
+        orderBy("number", "desc")
+      );
+
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        results.innerHTML = "<p>No images found for that username.</p>";
+        return;
+      }
+
+      snap.forEach((doc) => {
+        const d = doc.data();
+        const div = document.createElement("div");
+        div.className = "card";
+        div.innerHTML = `
+          <h3>${d.name} #${d.number}</h3>
+          <img src="${d.url}" alt="${d.name} #${d.number}">
+          <p>
+            <a href="${d.url}" download>
+              <button>Download</button>
+            </a>
+          </p>
+        `;
+        results.appendChild(div);
+      });
+    };
+  </script>
 </body>
 </html>
