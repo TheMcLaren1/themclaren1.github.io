@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin Upload</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 16px; max-width: 900px; margin: 0 auto; }
+    input, button { font-size: 16px; padding: 10px; margin: 6px 0; width: 100%; }
+    .box { border: 1px solid #ddd; padding: 12px; border-radius: 10px; margin: 12px 0; }
+    .ok { color: green; }
+    .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h1>Admin Upload</h1>
+
+  <div class="box">
+    <h3>Sign in</h3>
+    <input id="email" placeholder="Email" />
+    <input id="password" type="password" placeholder="Password" />
+    <button id="login">Login</button>
+    <button id="logout" style="display:none;">Logout</button>
+    <p id="status"></p>
+  </div>
+
+  <div class="box">
+    <h3>Upload image</h3>
+    <input id="roblox" placeholder="Roblox username (name property)" />
+    <input id="file" type="file" accept="image/*" />
+    <button id="upload" disabled>Upload</button>
+    <p id="uploadStatus"></p>
+  </div>
+
+  <p><a href="./index.html">Back</a></p>
+
+  <script type="module">
+    import { firebaseConfig } from "./firebase-config.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+      from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, getDoc, runTransaction, setDoc, serverTimestamp }
+      from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    import { getStorage, ref, uploadBytes, getDownloadURL }
+      from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+
+    const status = document.getElementById("status");
+    const uploadStatus = document.getElementById("uploadStatus");
+    const uploadBtn = document.getElementById("upload");
+    const loginBtn = document.getElementById("login");
+    const logoutBtn = document.getElementById("logout");
+
+    const norm = (s) => (s || "").trim().toLowerCase();
+
+    async function isAdmin(uid) {
+      const snap = await getDoc(doc(db, "admins", uid));
+      return snap.exists();
+    }
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        status.textContent = "Not signed in.";
+        status.className = "err";
+        uploadBtn.disabled = true;
+        logoutBtn.style.display = "none";
+        return;
+      }
+      logoutBtn.style.display = "block";
+      const ok = await isAdmin(user.uid);
+      if (!ok) {
+        status.textContent = "Signed in, but NOT an admin.";
+        status.className = "err";
+        uploadBtn.disabled = true;
+        return;
+      }
+      status.textContent = "Signed in as admin ✅";
+      status.className = "ok";
+      uploadBtn.disabled = false;
+    });
+
+    loginBtn.onclick = async () => {
+      try {
+        await signInWithEmailAndPassword(
+          auth,
+          document.getElementById("email").value.trim(),
+          document.getElementById("password").value
+        );
+      } catch (e) {
+        status.textContent = e.message;
+        status.className = "err";
+      }
+    };
+
+    logoutBtn.onclick = async () => { await signOut(auth); };
+
+    uploadBtn.onclick = async () => {
+      uploadStatus.textContent = "";
+      uploadStatus.className = "";
+
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const name = norm(document.getElementById("roblox").value);
+      const file = document.getElementById("file").files[0];
+
+      if (!name) { uploadStatus.textContent = "Enter a Roblox username."; uploadStatus.className="err"; return; }
+      if (!file) { uploadStatus.textContent = "Choose an image file."; uploadStatus.className="err"; return; }
+
+      try {
+        // atomic increment per name: counters/{name}.nextNumber
+        const { number } = await runTransaction(db, async (tx) => {
+          const cRef = doc(db, "counters", name);
+          const cSnap = await tx.get(cRef);
+
+          let next = 1;
+          if (cSnap.exists()) next = cSnap.data().nextNumber || 1;
+
+          tx.set(cRef, { nextNumber: next + 1 }, { merge: true });
+          return { number: next };
+        });
+
+        const path = `images/${name}/${number}/${file.name}`;
+        const fileRef = ref(storage, path);
+
+        await uploadBytes(fileRef, file);                 // upload  [oai_citation:8‡Firebase](https://firebase.google.com/docs/storage/web/upload-files?utm_source=chatgpt.com)
+        const url = await getDownloadURL(fileRef);        // download URL  [oai_citation:9‡Firebase](https://firebase.google.com/docs/storage/web/download-files?utm_source=chatgpt.com)
+
+        await setDoc(doc(db, "images", `${name}_${number}`), {
+          name,
+          number,
+          url,
+          storagePath: path,
+          createdAt: serverTimestamp(),
+          uploadedBy: user.uid
+        });
+
+        uploadStatus.textContent = `Uploaded ${name} #${number} ✅`;
+        uploadStatus.className = "ok";
+      } catch (e) {
+        uploadStatus.textContent = e.message;
+        uploadStatus.className = "err";
+      }
+    };
+  </script>
+</body>
+</html>
